@@ -1,3 +1,5 @@
+import crypto from "crypto";
+if (!globalThis.crypto) globalThis.crypto = crypto;
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { IAMClient, GetAccountSummaryCommand, GetAccountPasswordPolicyCommand, GenerateCredentialReportCommand, GetCredentialReportCommand, ListUsersCommand, ListUserPoliciesCommand, ListGroupsForUserCommand } from "@aws-sdk/client-iam";
 import { CloudTrailClient, DescribeTrailsCommand } from "@aws-sdk/client-cloudtrail";

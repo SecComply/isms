@@ -1,3 +1,5 @@
+import crypto from "crypto";
+if (!globalThis.crypto) globalThis.crypto = crypto;
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 
 const headers = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Methods": "POST, OPTIONS" };

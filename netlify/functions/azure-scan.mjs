@@ -1,3 +1,5 @@
+import crypto from "crypto";
+if (!globalThis.crypto) globalThis.crypto = crypto;
 import { ClientSecretCredential } from "@azure/identity";
 import { SubscriptionClient } from "@azure/arm-subscriptions";
 import { StorageManagementClient } from "@azure/arm-storage";
