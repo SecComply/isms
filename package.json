@@ -7,7 +7,7 @@
     "dev": "node server.mjs",
     "dev:frontend": "npx vite",
     "dev:backend": "node server.mjs",
-    "build": "vite build",
+    "build": "npx vite build",
     "preview": "vite preview"
   },
   "dependencies": {
