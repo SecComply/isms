@@ -245,7 +245,7 @@ const PERMS = {
   soa:        {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit"],client_user:["view","create","edit"],client_employee:[]},
   gap:        {super_admin:["view","create","edit","delete","approve"],employee:["view","create","edit","delete","approve"],client_admin:["view","create","edit"],client_user:["view","create","edit"],client_employee:[]},
   workflow:   {super_admin:["view","edit","approve","upload","delete"],employee:["view","edit","approve","upload","delete"],client_admin:["view","edit","upload"],client_user:["view","edit","upload"],client_employee:[]},
-  risk:       {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit"],client_user:["view","create","edit"],client_employee:["view"]},
+  risk:       {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit"],client_user:["view","create","edit"],client_employee:[]},
   assets:     {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit"],client_user:["view","create","edit"],client_employee:[]},
   policies:   {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit","upload"],client_user:["view","create","edit","upload"],client_employee:[]},
   evidence:   {super_admin:["view","create","edit","delete","approve"],employee:["view","create","edit","delete","approve"],client_admin:["view","create","edit","upload"],client_user:["view","create","edit","upload"],client_employee:[]},
@@ -254,7 +254,7 @@ const PERMS = {
   training:   {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit"],client_user:["view","create","edit"],client_employee:["view"]},
   cloud:      {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit"],client_user:["view"],client_employee:[]},
   github:     {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit"],client_user:["view"],client_employee:[]},
-  vendors:    {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit"],client_user:["view","create","edit"],client_employee:["view"]},
+  vendors:    {super_admin:["view","create","edit","delete"],employee:["view","create","edit","delete"],client_admin:["view","create","edit"],client_user:["view","create","edit"],client_employee:[]},
 };
 
 const hasPerm = (role, mod, action) => (PERMS[mod]?.[role]||[]).includes(action);
@@ -476,6 +476,34 @@ const createAuthUser = async(token, email, password, name, role, orgId) => {
     }),
   });
   if(!roleRes.ok) console.warn("Role insert failed — user created but role not assigned. They can still log in.");
+
+  await auditLog(token, "create_user", { resource_type: "user", resource_id: userId, org_id: orgId, email: cleanEmail, role }, "critical");
+
+  return { id: userId, email: cleanEmail };
+};
+
+// Create employee via Netlify function (Admin API) — NO email invite sent
+const createEmployeeNoEmail = async(token, email, password, name, role, orgId) => {
+  const pwCheck = validatePasswordComplexity(password);
+  if (!pwCheck.valid) throw new Error("Password requirements:\n• " + pwCheck.errors.join("\n• "));
+  if (!email || !name || !role) throw new Error("All fields are required");
+
+  const cleanEmail = email.toLowerCase().trim();
+
+  // Call Netlify function which uses Supabase Admin API (no invite email)
+  const res = await safeFetch("/api/create-employee", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: cleanEmail, password, name: name.trim(), role, orgId, callerToken: token }),
+  });
+
+  const d = await res.json().catch(()=>({}));
+  if (!res.ok) {
+    throw new Error(d.error || `Account creation failed (HTTP ${res.status})`);
+  }
+
+  const userId = d.id;
+  if (!userId) throw new Error("Account created but no user ID returned.");
 
   await auditLog(token, "create_user", { resource_type: "user", resource_id: userId, org_id: orgId, email: cleanEmail, role }, "critical");
 
@@ -5527,7 +5555,7 @@ const AdminPanel = ({rbac,setRbac,token,currentRole,onEnterClient,user,currentOr
         const email = row["Email"]||row["email"]|| `${slug}@${domain}`;
         const pw = genPassword();
         try {
-          const authUser = await createAuthUser(token, email, pw, name.trim(), "client_employee", orgId);
+          const authUser = await createEmployeeNoEmail(token, email, pw, name.trim(), "client_employee", orgId);
           newMembers.push({id:secureId('m_'),userId:authUser.id,email:sanitizeInput(email),name:sanitizeInput(name.trim()),role:"client_employee",type:"client",orgId,createdBy:user.email,createdAt:new Date().toISOString(),status:"active"});
           results.push({name:name.trim(),email,password:pw,status:"✅ Created"});
         } catch(e) {
@@ -5541,9 +5569,9 @@ const AdminPanel = ({rbac,setRbac,token,currentRole,onEnterClient,user,currentOr
     setCreating(false);
   };
 
-  // Export credentials — [PATCH V4] passwords NOT exported + [SEC-2] audit
+  // Export credentials — passwords included since no email invite is sent
   const exportCredentials = (results) => {
-    const ws = XLSX.utils.json_to_sheet(results.map(r=>({Name:r.name,Email:r.email,Password:"[Set via email invite]",Status:r.status})));
+    const ws = XLSX.utils.json_to_sheet(results.map(r=>({Name:r.name,Email:r.email,Password:r.password||"-",Status:r.status})));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,ws,"Credentials");
     XLSX.writeFile(wb,"employee_accounts.xlsx");
@@ -5734,7 +5762,7 @@ const AdminPanel = ({rbac,setRbac,token,currentRole,onEnterClient,user,currentOr
     <Modal open={!!bulkModal} onClose={()=>{setBulkModal(null);setBulkResults(null);setError("");}}>
       {bulkModal&&<div>
         <h3 style={{margin:"0 0 8px",color:C.text,fontSize:16,fontWeight:800}}>Bulk Employee Upload</h3>
-        <p style={{color:C.textMuted,fontSize:12,marginBottom:12}}>Upload Excel with employee names. Accounts will be auto-created.</p>
+        <p style={{color:C.textMuted,fontSize:12,marginBottom:12}}>Upload Excel with employee names. Accounts will be auto-created with credentials (no invite email sent).</p>
         {error&&<div style={{padding:"8px 12px",background:C.redBg,border:`1px solid ${C.red}44`,borderRadius:8,color:C.red,fontSize:12,marginBottom:12}}>{error}</div>}
         <div style={{padding:12,background:C.bg,borderRadius:8,border:`1px solid ${C.border}`,marginBottom:12}}>
           <div style={{fontSize:11,color:C.textDim,marginBottom:6,fontWeight:700}}>EXCEL FORMAT:</div>
@@ -5757,12 +5785,12 @@ const AdminPanel = ({rbac,setRbac,token,currentRole,onEnterClient,user,currentOr
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead><tr style={{background:C.bg}}><th style={{padding:"6px 8px",textAlign:"left",color:C.textDim}}>Name</th><th style={{padding:"6px 8px",textAlign:"left",color:C.textDim}}>Email</th><th style={{padding:"6px 8px",textAlign:"left",color:C.textDim}}>Temp Password</th><th style={{padding:"6px 8px",textAlign:"left",color:C.textDim}}>Status</th></tr></thead>
               <tbody>{bulkResults.map((r,i)=>(
-                <tr key={i} style={{borderBottom:`1px solid ${C.border}22`}}><td style={{padding:"5px 8px",color:C.text}}>{r.name}</td><td style={{padding:"5px 8px",color:C.textMuted}}>{r.email}</td><td style={{padding:"5px 8px",color:C.orange,fontFamily:"monospace"}}>{r.password ? r.password.slice(0,3) + "•••••••" : "-"}</td><td style={{padding:"5px 8px"}}>{r.status}</td></tr>
+                <tr key={i} style={{borderBottom:`1px solid ${C.border}22`}}><td style={{padding:"5px 8px",color:C.text}}>{r.name}</td><td style={{padding:"5px 8px",color:C.textMuted}}>{r.email}</td><td style={{padding:"5px 8px",color:C.orange,fontFamily:"monospace"}}>{r.password || "-"}</td><td style={{padding:"5px 8px"}}>{r.status}</td></tr>
               ))}</tbody>
             </table>
           </div>
           <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:12}}>
-            <Btn variant="secondary" onClick={()=>exportCredentials(bulkResults)}><Download size={12}/> Export Credentials</Btn>
+            <Btn variant="secondary" onClick={()=>exportCredentials(bulkResults)}><Download size={12}/> Export Credentials (with Passwords)</Btn>
             <Btn onClick={()=>{setBulkModal(null);setBulkResults(null);}}>Done</Btn>
           </div>
         </>}
