@@ -1,5 +1,5 @@
 [build]
-  command = "npm install && node node_modules/vite/bin/vite.js build"
+  command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
 
@@ -28,6 +28,11 @@
 [[redirects]]
   from = "/api/azure/scan"
   to = "/.netlify/functions/azure-scan"
+  status = 200
+
+[[redirects]]
+  from = "/api/create-employee"
+  to = "/.netlify/functions/create-employee"
   status = 200
 
 # SPA fallback
